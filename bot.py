@@ -5,6 +5,7 @@ import asyncio
 import random
 import string
 from typing import Dict, Any
+import sys
 
 from telegram import (
     Update,
@@ -31,7 +32,9 @@ logger = logging.getLogger(__name__)
 # Bot token from environment
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
-    raise ValueError("No BOT_TOKEN found in environment variables")
+    logger.error("❌ No BOT_TOKEN found in environment variables!")
+    logger.error("Please set BOT_TOKEN in your Render environment variables.")
+    sys.exit(1)
 
 # Generate a dummy Solana wallet address for the user
 def generate_dummy_wallet() -> str:
@@ -64,13 +67,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "────────────────\n"
         "*INTRODUCTION*\n\n"
         "Welcome to *Solana Trading Pro* - The ultimate automated "
-        "trading solution for Solana ecosystem.\n\n"
-        "• *Fast Swaps*: Instant MEV-protected trades\n"
+        "trading solution for Solana ecosystem\\.\n\n"
+        "• *Fast Swaps*: Instant MEV\\-protected trades\n"
         "• *Limit Orders*: Advanced order types\n"
         "• *Copy Trading*: Mirror top traders\n"
-        "• *DCA Strategy*: Dollar-cost averaging\n"
-        "• *Portfolio Tracking*: Real-time P&L\n\n"
-        "*By continuing, you accept all risks and terms.*"
+        "• *DCA Strategy*: Dollar\\-cost averaging\n"
+        "• *Portfolio Tracking*: Real\\-time P&L\n\n"
+        "*By continuing, you accept all risks and terms\\.*"
     )
     
     keyboard = [[
@@ -142,8 +145,8 @@ async def main_trading_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🏦 *MAIN TRADING MENU*\n\n"
         f"*{wallet_address}*\n\n"
         "────────────────\n"
-        "*Balance:* `$1,250.75`\n"
-        "*PnL (24h):* `+$45.30` 📈\n"
+        "*Balance:* `$1,250\\.75`\n"
+        "*PnL \\(24h\\):* `\\+$45\\.30` 📈\n"
         "*Active Positions:* `3`\n\n"
         "*Select an option:*"
     )
@@ -250,9 +253,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await start(update, context)
 
-# ========== MAIN FUNCTION ==========
-async def main():
-    """Start the bot"""
+# ========== SETUP BOT APPLICATION ==========
+def setup_bot():
+    """Setup and return the bot application"""
     
     # Create Application
     application = Application.builder().token(BOT_TOKEN).build()
@@ -261,9 +264,22 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_callback))
     
-    # Start bot
-    logger.info("Starting bot...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    return application
 
+# ========== RUN BOT FUNCTION ==========
+def run_bot():
+    """Run the bot (call this from app.py)"""
+    
+    application = setup_bot()
+    
+    # Start bot
+    logger.info("🤖 Starting Telegram Trading Bot...")
+    logger.info(f"✅ Bot username: @{application.bot.username}")
+    
+    # Run polling
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+# ========== MAIN EXECUTION ==========
 if __name__ == '__main__':
-    asyncio.run(main())
+    # This runs when executing bot.py directly (for local testing)
+    run_bot()
