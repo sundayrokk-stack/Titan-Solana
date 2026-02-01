@@ -1,9 +1,7 @@
 from flask import Flask, jsonify
-import threading
 import os
-import asyncio
-import subprocess
-import sys
+import logging
+from threading import Thread
 
 app = Flask(__name__)
 
@@ -19,21 +17,20 @@ def home():
 def health():
     return jsonify({"status": "healthy"}), 200
 
-def run_bot():
-    """Run the Telegram bot in a subprocess"""
+def start_bot():
+    """Import and run the bot in a separate thread"""
     try:
-        # Run the bot
-        subprocess.run([sys.executable, "bot.py"])
+        # Import here to avoid circular imports
+        from bot import run_bot
+        run_bot()
     except Exception as e:
-        print(f"Bot error: {e}")
+        logging.error(f"Failed to start bot: {e}")
 
 if __name__ == '__main__':
-    # Get port from environment (Render sets this)
-    port = int(os.environ.get('PORT', 5000))
-    
-    # Start bot in a separate thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    # Start bot in a background thread
+    bot_thread = Thread(target=start_bot, daemon=True)
     bot_thread.start()
     
     # Start Flask app
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
