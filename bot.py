@@ -18,19 +18,23 @@ load_dotenv()
 
 # --- 1. STATES ---
 (
-    START_SCREEN, INTRO_SCREEN, MAIN_MENU,
-    WAITING_INPUT, # Generic state for button-specific questions
-    WAITING_WITHDRAW_ADDR, WAITING_WITHDRAW_AMT
+    START_SCREEN, 
+    INTRO_SCREEN, 
+    MAIN_MENU,
+    WAITING_INPUT,
+    WAITING_WITHDRAW_ADDR, 
+    WAITING_WITHDRAW_AMT
 ) = range(6)
 
-# --- 2. WEB SERVER (For Render) ---
+# --- 2. WEB SERVER ---
 app = Flask(__name__)
 @app.route('/')
 def health(): return "Titan Online", 200
 def run_flask(): app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# --- 3. MAIN MENU UI (5-Row Grid) ---
+# --- 3. UI LAYOUT ---
 def main_menu_keyboard():
+    # Exactly 14 buttons in a 5-row professional grid
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Sniper", callback_data="btn_sniper"), 
          InlineKeyboardButton("⚖️ DCA", callback_data="btn_dca"), 
@@ -48,15 +52,15 @@ def main_menu_keyboard():
          InlineKeyboardButton("❓ Help", callback_data="btn_help")]
     ])
 
-# --- 4. NAVIGATION HANDLERS ---
+# --- 4. FLOW HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "━━━━━━━━━━━━━━━\n"
         "⚠️  *IMPORTANT RISK WARNING* ⚠️\n"
         "━━━━━━━━━━━━━━━\n\n"
-        "Trading digital assets involves significant risk\. "
-        "Solana prices are highly volatile\. Only invest what you can afford to lose\.\n\n"
-        "🙋‍♂️ *SUPPORT:* Contact @ads2defi only\."
+        "Trading Solana tokens involves high risk\. Prices move fast\! "
+        "Never trade money you cannot afford to lose\.\n\n"
+        "🙋‍♂️ *SUPPORT:* @ads2defi"
     )
     reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("➡️ CONTINUE", callback_data="go_intro")]])
     if update.callback_query:
@@ -70,11 +74,11 @@ async def show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🚀 *WELCOME TO TITAN TERMINAL*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Titan is the fastest trading engine on Solana\.\n"
-        "• Direct Jupiter V6 Smart Routing\n"
-        "• Instant Buy/Sell Execution\n"
-        "• Advanced Sniping & DCA tools\n\n"
-        "Click below to initialize your secure wallet\."
+        "Titan is the world's fastest Solana trading bot\.\n"
+        "• Execute trades in < 1 second\n"
+        "• Advanced Sniping & DCA logic\n"
+        "• Secure, Encrypted Wallets\n\n"
+        "Support: @ads2defi"
     )
     reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START TRADING", callback_data="go_main")]])
     await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
@@ -87,7 +91,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "💳 *Wallet:* `7xKX...v9PQ7L`\n"
         "💰 *Balance:* `0.00 SOL`\n\n"
-        "Select a function below to begin trading\:"
+        "Select a function below to begin\:"
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
@@ -95,64 +99,52 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
     return MAIN_MENU
 
-# --- 5. INTERACTIVE BUTTON LOGIC (ALL 14 BUTTONS) ---
-async def handle_trading_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- 5. INTERACTIVE BUTTON LOGIC ---
+async def handle_all_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    btn_type = query.data.replace("btn_", "")
+    data = query.data
 
-    # Define prompts for buttons that need user text input
-    input_prompts = {
-        "sniper": "🚀 *SNIPER MODE*\nPlease enter the Token Contract Address (CA) you wish to snipe:",
-        "dca": "⚖️ *DCA STRATEGY*\nEnter the Token CA and interval (e.g., `CA 1h`):",
-        "buy": "💳 *QUICK BUY*\nEnter the Token Contract Address (CA) to purchase:",
-        "sell": "💰 *QUICK SELL*\nEnter the Token Contract Address (CA) to sell:",
-        "copy": "👥 *COPY TRADING*\nEnter the Solana wallet address you want to follow:",
-        "watchlist": "👀 *WATCHLIST*\nEnter the Token CA to add to your alerts:",
+    # Map buttons to their specific prompts
+    prompts = {
+        "btn_sniper": "🚀 *SNIPER*: Paste the Token CA to begin sniping:",
+        "btn_dca": "⚖️ *DCA*: Enter Token CA and buy interval (e.g. `CA 1h`):",
+        "btn_buy": "💳 *BUY*: Enter the Token CA you want to buy:",
+        "btn_sell": "💰 *SELL*: Enter the Token CA you want to sell:",
+        "btn_copy": "👥 *COPY*: Enter the wallet address to follow:",
+        "btn_watchlist": "👀 *WATCHLIST*: Enter CA to track:",
     }
 
-    if btn_type in input_prompts:
-        await query.edit_message_text(input_prompts[btn_type], parse_mode=ParseMode.MARKDOWN_V2)
-        context.user_data['last_action'] = btn_type
+    if data in prompts:
+        await query.edit_message_text(prompts[data], parse_mode=ParseMode.MARKDOWN_V2)
+        context.user_data['current_action'] = data
         return WAITING_INPUT
-    
-    if btn_type == "withdraw":
-        await query.edit_message_text("💸 *WITHDRAWAL*\nPlease enter the destination Solana wallet address:")
+
+    if data == "btn_withdraw":
+        await query.edit_message_text("💸 *WITHDRAW*: Enter the destination SOL address:")
         return WAITING_WITHDRAW_ADDR
 
-    # Instant response buttons
-    instant_responses = {
-        "trenches": "🌊 *TRENCHES*: Scanning new migrations on Pump\.fun\.\.\.",
-        "pos": "📈 *POSITIONS*: No active trading positions found\.",
-        "rewards": "🎁 *REWARDS*: You currently have `0` points\. Trade to earn\!",
-        "settings": "⚙️ *SETTINGS*\n• Auto-buy: OFF\n• Slipper: 0\.5%\n• Priority: Turbo",
-        "ref": "🤝 *REFERRAL PROGRAM*\nYour link: `t.me/TitanBot?start=ref_user`",
-        "help": "❓ *HELP & SUPPORT*\nContact @ads2defi for technical assistance\."
+    # Responses for buttons that don't need text input
+    instant = {
+        "btn_trenches": "🌊 *TRENCHES*: Scanning new tokens on Pump\.fun\.\.\.",
+        "btn_pos": "📈 *POSITIONS*: No active trades found\.",
+        "btn_rewards": "🎁 *REWARDS*: Balance: `0` points\. Trade to earn\!",
+        "btn_settings": "⚙️ *SETTINGS*: Auto-Buy: [OFF] | Slippage: [1%]",
+        "btn_ref": "🤝 *REFERRAL*: Your link: `t.me/TitanBot?start=ref_1`",
+        "btn_help": "❓ *HELP*: Reach out to @ads2defi for 24/7 support\.",
+        "btn_refresh": "🔄 *REFRESHING*\.\.\."
     }
-    
-    msg = instant_responses.get(btn_type, "Action initialized\.")
-    await query.edit_message_text(f"{msg}\n\nClick Refresh to return to main menu\.", reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
-    return MAIN_MENU
 
-# --- 6. INPUT PROCESSORS ---
-async def process_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    action = context.user_data.get('last_action', 'trade')
-    await update.message.reply_text(f"✅ *{action.upper()} RECEIVED*\nProcessing `{user_text}`\.\.\.", parse_mode=ParseMode.MARKDOWN_V2)
+    if data in instant:
+        await query.edit_message_text(f"{instant[data]}\n\nClick Refresh to return\.", reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
+        return MAIN_MENU
+
+async def process_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This catches the text after user clicks Sniper/Buy/etc
+    await update.message.reply_text(f"✅ Received\! Processing your request\.\.\.\nSupport: @ads2defi", parse_mode=ParseMode.MARKDOWN_V2)
     return await show_main_menu(update, context)
 
-async def process_withdraw_addr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['w_addr'] = update.message.text
-    await update.message.reply_text("Wallet accepted\. Now enter the amount of SOL to withdraw:")
-    return WAITING_WITHDRAW_AMT
-
-async def process_withdraw_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    amt = update.message.text
-    addr = context.user_data.get('w_addr')
-    await update.message.reply_text(f"📤 *WITHDRAWAL INITIATED*\nAmount: {amt} SOL\nTo: `{addr}`", parse_mode=ParseMode.MARKDOWN_V2)
-    return await show_main_menu(update, context)
-
-# --- 7. MAIN APP ---
+# --- 6. MAIN APP SETUP ---
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     app_bot = Application.builder().token(os.getenv("BOT_TOKEN")).build()
@@ -163,13 +155,12 @@ def main():
             START_SCREEN: [CallbackQueryHandler(show_intro, pattern="^go_intro$")],
             INTRO_SCREEN: [CallbackQueryHandler(show_main_menu, pattern="^go_main$")],
             MAIN_MENU: [
-                CallbackQueryHandler(handle_trading_buttons, pattern="^btn_"),
-                CallbackQueryHandler(show_main_menu, pattern="^btn_refresh$"),
-                CallbackQueryHandler(start, pattern="^go_intro$"), # Allows reset
+                # This pattern "^btn_" catches all 14 buttons properly
+                CallbackQueryHandler(handle_all_buttons, pattern="^btn_"),
+                CallbackQueryHandler(show_main_menu, pattern="^btn_refresh$")
             ],
-            WAITING_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_user_input)],
-            WAITING_WITHDRAW_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_withdraw_addr)],
-            WAITING_WITHDRAW_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_withdraw_final)],
+            WAITING_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_text_input)],
+            WAITING_WITHDRAW_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_text_input)],
         },
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True
