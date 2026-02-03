@@ -4,4 +4,3 @@ flask
 httpx
 solders
 solana
-gunicorn
