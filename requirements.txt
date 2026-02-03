@@ -1,6 +1,7 @@
-python-telegram-bot[job-queue]==20.*
+python-telegram-bot[job-queue]==20.8
 python-dotenv
 flask
 httpx
 solders
 solana
+gunicorn
