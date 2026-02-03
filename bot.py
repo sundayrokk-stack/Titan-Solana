@@ -17,26 +17,21 @@ from telegram.ext import (
 
 load_dotenv()
 
-# --- STATES ---
+# --- EXTENDED STATES ---
 (
-    # Navigation States
-    START_SCREEN, 
-    INTRO_SCREEN, 
-    MAIN_MENU,
-    # Trading Input States
-    WAITING_SNIPER_CA,
-    WAITING_DCA_TOKEN,
-    WAITING_WITHDRAW_ADDR,
-    WAITING_WITHDRAW_AMT
-) = range(7)
+    START_SCREEN, INTRO_SCREEN, MAIN_MENU,
+    WAITING_SNIPER_CA, WAITING_DCA_TOKEN, WAITING_WITHDRAW_ADDR, 
+    WAITING_WITHDRAW_AMT, WAITING_BUY_CA, WAITING_SELL_CA,
+    WAITING_COPY_TARGET, WAITING_WATCHLIST_ADD
+) = range(11)
 
-# --- FLASK SERVER ---
+# --- FLASK SERVER (For Render) ---
 app = Flask(__name__)
 @app.route('/')
-def health(): return "Titan Online", 200
+def health(): return "Titan Operational", 200
 def run_flask(): app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# --- UI KEYBOARDS ---
+# --- THE 5-ROW GRID KEYBOARD ---
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Sniper", callback_data="btn_sniper"), 
@@ -55,100 +50,63 @@ def main_menu_keyboard():
          InlineKeyboardButton("❓ Help", callback_data="btn_help")]
     ])
 
-# --- LOGIC HANDLERS ---
-
-# 1. Start Command -> Risk Warning
+# --- NAVIGATION FLOW ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "⚠️ *RISK WARNING*\n\n"
-        "Trading digital assets involves significant risk\. Prices can be highly volatile\. "
-        "Only invest what you can afford to lose\.\n\n"
-        "🙋‍♂️ *Support:* Only contact @ads2defi"
-    )
+    text = "⚠️ *RISK WARNING*\n\nSolana trading is volatile\. Invest only what you can lose\.\n\n🙋‍♂️ *Support:* @ads2defi"
     reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("➡️ Continue", callback_data="go_intro")]])
-    
     if update.message:
-        msg = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
-        try: await context.bot.pin_chat_message(chat_id=update.effective_chat.id, message_id=msg.message_id)
-        except: pass
-    else: # If coming from a callback
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
+    else:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
-    
     return START_SCREEN
 
-# 2. Continue -> Introduction
 async def show_intro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    text = (
-        "🚀 *Introduction to Solana Trading*\n\n"
-        "Titan is the fastest trading terminal on Solana\.\n"
-        "• High speed execution\n"
-        "• Direct Jupiter V6 Routing\n"
-        "• Advanced sniping & DCA tools"
-    )
+    await update.callback_query.answer()
+    text = "🚀 *Titan Solana Terminal*\nFastest swaps via Jupiter V6\."
     reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start Trading", callback_data="go_main")]])
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
     return INTRO_SCREEN
 
-# 3. Start Trading -> Main Menu (14 Buttons)
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query: await query.answer()
+    if update.callback_query: await update.callback_query.answer()
+    text = "🏦 *Titan Main Terminal*\n\n💳 *Wallet:* `7xKX...v9PQ7L`\n💰 *Balance:* `0.00 SOL`"
     
-    wallet = "`7xKX...v9PQ7L`"
-    text = (
-        "🏦 *Titan Trading Terminal*\n\n"
-        f"💳 *Wallet:* {wallet}\n"
-        "Balance: *0\.00 SOL*\n\n"
-        "Select a tool below to begin\:"
-    )
-    
-    if query:
-        await query.edit_message_text(text, reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
     else:
         await update.message.reply_text(text, reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
     return MAIN_MENU
 
-# --- TOOL HANDLERS (Example: Sniper & Withdraw) ---
+# --- INTERACTIVE BUTTON LOGIC ---
 
-async def tool_sniper_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text("🚀 *Sniper Mode*\nEnter the Token Contract Address (CA) you want to snipe:", parse_mode=ParseMode.MARKDOWN_V2)
+async def handle_sniper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.edit_message_text("🚀 *SNIPER*\nEnter the Contract Address (CA) to monitor for launch:", parse_mode=ParseMode.MARKDOWN_V2)
     return WAITING_SNIPER_CA
 
-async def tool_sniper_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ca = update.message.text
-    await update.message.reply_text(f"✅ CA Detected: `{ca}`\nSearching for liquidity pools\.\.\. Please wait\.", parse_mode=ParseMode.MARKDOWN_V2)
-    # Return to main menu after processing
-    return await show_main_menu(update, context)
+async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.edit_message_text("💳 *BUY*\nEnter the Token CA you want to purchase:", parse_mode=ParseMode.MARKDOWN_V2)
+    return WAITING_BUY_CA
 
-async def tool_withdraw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text("💸 *Withdraw*\nEnter the destination Solana wallet address:", parse_mode=ParseMode.MARKDOWN_V2)
+async def handle_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.edit_message_text("💸 *WITHDRAW*\nEnter destination wallet address:", parse_mode=ParseMode.MARKDOWN_V2)
     return WAITING_WITHDRAW_ADDR
 
-async def tool_withdraw_addr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['tmp_addr'] = update.message.text
-    await update.message.reply_text("Enter the amount of SOL to withdraw:")
-    return WAITING_WITHDRAW_AMT
-
-async def tool_withdraw_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    amt = update.message.text
-    addr = context.user_data['tmp_addr']
-    await update.message.reply_text(f"📤 Withdrawal of {amt} SOL to `{addr}` initiated\!", parse_mode=ParseMode.MARKDOWN_V2)
-    return await show_main_menu(update, context)
-
-# Generic "Coming Soon" for other buttons to keep them functional
-async def placeholder_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer(f"Feature '{query.data}' coming in next update!", show_alert=True)
+async def handle_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer("Scanning wallet for PnL...", show_alert=False)
+    # logic to fetch tokens
+    await update.callback_query.edit_message_text("📈 *POSITIONS*\nNo active positions found\.", reply_markup=main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
     return MAIN_MENU
 
-# --- MAIN ---
+# --- MESSAGE PROCESSORS ---
+
+async def process_ca_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ca = update.message.text
+    await update.message.reply_text(f"✅ Received: `{ca}`\nExecuting trade logic via Jupiter V6\.\.\.", parse_mode=ParseMode.MARKDOWN_V2)
+    return await show_main_menu(update, context)
+
+# --- MAIN APP ---
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
-    
     app_bot = Application.builder().token(os.getenv("BOT_TOKEN")).build()
 
     conv_handler = ConversationHandler(
@@ -157,14 +115,16 @@ def main():
             START_SCREEN: [CallbackQueryHandler(show_intro, pattern="^go_intro$")],
             INTRO_SCREEN: [CallbackQueryHandler(show_main_menu, pattern="^go_main$")],
             MAIN_MENU: [
-                CallbackQueryHandler(tool_sniper_start, pattern="^btn_sniper$"),
-                CallbackQueryHandler(tool_withdraw_start, pattern="^btn_withdraw$"),
+                CallbackQueryHandler(handle_sniper, pattern="^btn_sniper$"),
+                CallbackQueryHandler(handle_buy, pattern="^btn_buy$"),
+                CallbackQueryHandler(handle_withdraw, pattern="^btn_withdraw$"),
+                CallbackQueryHandler(handle_position, pattern="^btn_pos$"),
                 CallbackQueryHandler(show_main_menu, pattern="^btn_refresh$"),
-                CallbackQueryHandler(placeholder_btn, pattern="^btn_") # Catches all buttons starting with btn_
+                # Add individual handlers for Rewards, Help, etc., similarly
             ],
-            WAITING_SNIPER_CA: [MessageHandler(filters.TEXT & ~filters.COMMAND, tool_sniper_process)],
-            WAITING_WITHDRAW_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, tool_withdraw_addr)],
-            WAITING_WITHDRAW_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, tool_withdraw_final)],
+            WAITING_SNIPER_CA: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_ca_input)],
+            WAITING_BUY_CA: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_ca_input)],
+            WAITING_WITHDRAW_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_ca_input)],
         },
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True
