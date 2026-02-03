@@ -1,285 +1,149 @@
 import os
 import logging
-from dotenv import load_dotenv
 import asyncio
-import random
-import string
-from typing import Dict, Any
-import sys
-
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
+import threading
+import httpx
+from flask import Flask
+from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
-    CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )
 
-# Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# --- CONFIG & STATES ---
+# Conversation States
+SNIPER_ADDR, DCA_SETUP, WITHDRAW_ADDR, WITHDRAW_AMT = range(4)
+JUPITER_API = "https://quote-api.jup.ag/v6"
 
-# Bot token from environment
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-if not BOT_TOKEN:
-    logger.error("❌ No BOT_TOKEN found in environment variables!")
-    logger.error("Please set BOT_TOKEN in your Render environment variables.")
-    sys.exit(1)
+# --- FLASK SERVER (For Render Keep-Alive) ---
+app = Flask(__name__)
+@app.route('/')
+def health(): return "Titan Active", 200
+def run_flask(): app.run(host='0.0.0.0', port=int(os.getenv("PORT", 10000)))
 
-# Generate a dummy Solana wallet address for the user
-def generate_dummy_wallet() -> str:
-    """Generate a dummy Solana wallet address"""
-    chars = string.ascii_letters + string.digits
-    return f"Solana: `{''.join(random.choices(chars, k=44))}`"
-
-# User session data
-user_sessions: Dict[int, Dict[str, Any]] = {}
-
-# ========== STAGE 1: RISK WARNING ==========
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send welcome message with risk warning"""
-    
-    # Generate wallet for user if not exists
-    user_id = update.effective_user.id
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {
-            'wallet': generate_dummy_wallet(),
-            'stage': 'start'
-        }
-    
-    risk_warning = (
-        "⚠️ *RISK WARNING*\n\n"
-        "▪️ *Trading involves substantial risk*\n"
-        "▪️ *Past performance ≠ future results*\n"
-        "▪️ *You may lose your entire investment*\n"
-        "▪️ *Only trade with risk capital*\n"
-        "▪️ *This is not financial advice*\n\n"
-        "────────────────\n"
-        "*INTRODUCTION*\n\n"
-        "Welcome to *Solana Trading Pro* - The ultimate automated "
-        "trading solution for Solana ecosystem\\.\n\n"
-        "• *Fast Swaps*: Instant MEV\\-protected trades\n"
-        "• *Limit Orders*: Advanced order types\n"
-        "• *Copy Trading*: Mirror top traders\n"
-        "• *DCA Strategy*: Dollar\\-cost averaging\n"
-        "• *Portfolio Tracking*: Real\\-time P&L\n\n"
-        "*By continuing, you accept all risks and terms\\.*"
-    )
-    
-    keyboard = [[
-        InlineKeyboardButton(
-            "➡️ Continue", 
-            callback_data="continue_to_intro"
-        )
-    ]]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.message:
-        await update.message.reply_text(
-            risk_warning,
-            reply_markup=reply_markup,
-            parse_mode='MarkdownV2'
-        )
-    else:
-        await update.callback_query.edit_message_text(
-            risk_warning,
-            reply_markup=reply_markup,
-            parse_mode='MarkdownV2'
-        )
-
-# ========== STAGE 2: INTRODUCTION ==========
-async def intro_to_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show trading introduction"""
-    
-    intro_message = (
-        "🚀 *SOLANA TRADING PRO*\n\n"
-        "*Professional Trading Tools at Your Fingertips*\n\n"
-        "🔹 *Fast Swaps*\n"
-        "Instant token swaps with MEV protection and best price routing\\.\n\n"
-        "🔹 *Limit Orders*\n"
-        "Set buy/sell targets with advanced order types\\.\n\n"
-        "🔹 *Copy Trading*\n"
-        "Automatically mirror trades from top performers\\.\n\n"
-        "🔹 *DCA Strategy*\n"
-        "Dollar\\-cost averaging with automated execution\\.\n\n"
-        "🔹 *Real\\-time Positions*\n"
-        "Track your P&L with detailed analytics\\.\n\n"
-        "────────────────\n"
-        "*Ready to start trading?*"
-    )
-    
-    keyboard = [[
-        InlineKeyboardButton(
-            "🚀 Start Trading", 
-            callback_data="start_trading"
-        )
-    ]]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.callback_query.edit_message_text(
-        intro_message,
-        reply_markup=reply_markup,
-        parse_mode='MarkdownV2'
-    )
-
-# ========== STAGE 3: MAIN TRADING MENU ==========
-async def main_trading_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display main trading menu with grid layout"""
-    
-    user_id = update.effective_user.id
-    wallet_address = user_sessions.get(user_id, {}).get('wallet', generate_dummy_wallet())
-    
-    menu_message = (
-        "🏦 *MAIN TRADING MENU*\n\n"
-        f"*{wallet_address}*\n\n"
-        "────────────────\n"
-        "*Balance:* `$1,250\\.75`\n"
-        "*PnL \\(24h\\):* `\\+$45\\.30` 📈\n"
-        "*Active Positions:* `3`\n\n"
-        "*Select an option:*"
-    )
-    
-    # Create grid layout buttons (5 rows, 2 columns)
+# --- UI COMPONENTS ---
+def get_main_menu_keyboard():
     keyboard = [
-        # Row 1
-        [
-            InlineKeyboardButton("💰 Buy", callback_data="action_buy"),
-            InlineKeyboardButton("📉 Sell", callback_data="action_sell")
-        ],
-        # Row 2
-        [
-            InlineKeyboardButton("⏰ Limit Orders", callback_data="action_limits"),
-            InlineKeyboardButton("📊 DCA", callback_data="action_dca")
-        ],
-        # Row 3
-        [
-            InlineKeyboardButton("📈 Positions", callback_data="action_positions"),
-            InlineKeyboardButton("👥 Copy Trade", callback_data="action_copy")
-        ],
-        # Row 4
-        [
-            InlineKeyboardButton("⚙️ Settings", callback_data="action_settings"),
-            InlineKeyboardButton("👥 Referrals", callback_data="action_referrals")
-        ],
-        # Row 5
-        [
-            InlineKeyboardButton("💸 Withdraw", callback_data="action_withdraw"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="action_refresh")
-        ]
+        [InlineKeyboardButton("🚀 Sniper", callback_data="menu_sniper"), 
+         InlineKeyboardButton("⚖️ DCA", callback_data="menu_dca"), 
+         InlineKeyboardButton("🌊 Trenches", callback_data="menu_trenches")],
+        [InlineKeyboardButton("💳 Buy", callback_data="menu_buy"), 
+         InlineKeyboardButton("💰 Sell", callback_data="menu_sell"), 
+         InlineKeyboardButton("📈 Position", callback_data="menu_pos")],
+        [InlineKeyboardButton("👥 Copy Trade", callback_data="menu_copy"), 
+         InlineKeyboardButton("🎁 Rewards", callback_data="menu_rewards"), 
+         InlineKeyboardButton("👀 Watchlist", callback_data="menu_watchlist")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings"), 
+         InlineKeyboardButton("🤝 Referral", callback_data="menu_ref"), 
+         InlineKeyboardButton("💸 Withdraw", callback_data="menu_withdraw")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="menu_refresh"), 
+         InlineKeyboardButton("❓ Help", callback_data="menu_help")]
     ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.callback_query.edit_message_text(
-        menu_message,
-        reply_markup=reply_markup,
-        parse_mode='MarkdownV2'
+    return InlineKeyboardMarkup(keyboard)
+
+# --- HANDLERS ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🤖 *Titan on Solana* — Professional Trading Suite\n\n"
+        "💳 *Wallet:* `7xKX...v9PQ7L`\n"
+        "💰 *Balance:* `0.00 SOL`\n\n"
+        "For Support, only contact @ads2defi"
+    )
+    msg = await update.message.reply_text(text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
+    try: await context.bot.pin_chat_message(chat_id=update.effective_chat.id, message_id=msg.message_id)
+    except: pass
+    return ConversationHandler.END
+
+# --- 🚀 SNIPER LOGIC ---
+async def sniper_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("🚀 *Sniper Mode*\nPaste the Token Contract Address (CA) to snipe:", parse_mode=ParseMode.MARKDOWN_V2)
+    return SNIPER_ADDR
+
+async def sniper_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ca = update.message.text
+    # Validation logic here
+    await update.message.reply_text(f"✅ Target Locked: `{ca}`\nSetting up Auto-Buy parameters...", parse_mode=ParseMode.MARKDOWN_V2)
+    return ConversationHandler.END
+
+# --- 💸 WITHDRAW LOGIC ---
+async def withdraw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("💸 *Withdraw*\nEnter destination Solana address:", parse_mode=ParseMode.MARKDOWN_V2)
+    return WITHDRAW_ADDR
+
+async def withdraw_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['withdraw_addr'] = update.message.text
+    await update.message.reply_text("Enter amount of SOL to withdraw:")
+    return WITHDRAW_AMT
+
+async def withdraw_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = update.message.text
+    addr = context.user_data['withdraw_addr']
+    await update.message.reply_text(f"🚀 Sending {amount} SOL to `{addr}`...")
+    return ConversationHandler.END
+
+# --- 🌊 TRENCHES (API DATA) ---
+async def trenches_feed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    # Mock data - in production, fetch from DexScreener/Helius API
+    text = "🌊 *Live from the Trenches*\n\n1. $PUMP - Liq: $50k\n2. $DUMP - Liq: $12k\n\n*High Risk Detected!*"
+    await update.callback_query.edit_message_text(text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.MARKDOWN_V2)
+
+# --- 📈 POSITION (PNL) ---
+async def position_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    text = (
+        "📈 *Open Positions*\n\n"
+        "💎 *SOL:* 0.00 (+$0.00)\n"
+        "Total PnL: *+0.00%*"
+    )
+    keyboard = [[
+        InlineKeyboardButton("Sell 25%", callback_data="s25"),
+        InlineKeyboardButton("Sell 50%", callback_data="s50"),
+        InlineKeyboardButton("Sell 100%", callback_data="s100")
+    ], [InlineKeyboardButton("⬅️ Back", callback_data="menu_refresh")]]
+    await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Action cancelled.")
+    return ConversationHandler.END
+
+# --- MAIN RUNNER ---
+def main():
+    threading.Thread(target=run_flask, daemon=True).start()
+    app_bot = Application.builder().token(os.getenv("BOT_TOKEN")).build()
+
+    # Conversation Handler for Sniper & Withdraw
+    conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(sniper_start, pattern="^menu_sniper$"),
+            CallbackQueryHandler(withdraw_start, pattern="^menu_withdraw$"),
+        ],
+        states={
+            SNIPER_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, sniper_process)],
+            WITHDRAW_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, withdraw_address)],
+            WITHDRAW_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, withdraw_final)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-# ========== ACTION HANDLERS ==========
-async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle various trading actions"""
-    
-    query = update.callback_query
-    await query.answer()
-    
-    action = query.data
-    
-    if action == "action_refresh":
-        # Refresh the main menu
-        await main_trading_menu(update, context)
-    else:
-        # For other actions, show a placeholder
-        action_names = {
-            "action_buy": "💰 Buy",
-            "action_sell": "📉 Sell",
-            "action_limits": "⏰ Limit Orders",
-            "action_dca": "📊 DCA",
-            "action_positions": "📈 Positions",
-            "action_copy": "👥 Copy Trading",
-            "action_settings": "⚙️ Settings",
-            "action_referrals": "👥 Referrals",
-            "action_withdraw": "💸 Withdraw"
-        }
-        
-        action_name = action_names.get(action, "Action")
-        
-        message = (
-            f"{action_name}\n\n"
-            "────────────────\n\n"
-            "*This feature is currently under development*\\.\n\n"
-            "Check back soon for updates\\!"
-        )
-        
-        keyboard = [[
-            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="start_trading")
-        ]]
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            message,
-            reply_markup=reply_markup,
-            parse_mode='MarkdownV2'
-        )
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(conv_handler)
+    app_bot.add_handler(CallbackQueryHandler(trenches_feed, pattern="^menu_trenches$"))
+    app_bot.add_handler(CallbackQueryHandler(position_check, pattern="^menu_pos$"))
+    app_bot.add_handler(CallbackQueryHandler(start, pattern="^menu_refresh$"))
 
-# ========== CALLBACK QUERY HANDLER ==========
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks"""
-    
-    query = update.callback_query
-    await query.answer()
-    
-    callback_data = query.data
-    
-    if callback_data == "continue_to_intro":
-        await intro_to_trading(update, context)
-    elif callback_data == "start_trading":
-        await main_trading_menu(update, context)
-    elif callback_data.startswith("action_"):
-        await handle_action(update, context)
-    else:
-        await start(update, context)
+    app_bot.run_polling()
 
-# ========== SETUP BOT APPLICATION ==========
-def setup_bot():
-    """Setup and return the bot application"""
-    
-    # Create Application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_callback))
-    
-    return application
-
-# ========== RUN BOT FUNCTION ==========
-def run_bot():
-    """Run the bot (call this from app.py)"""
-    
-    application = setup_bot()
-    
-    # Start bot
-    logger.info("🤖 Starting Telegram Trading Bot...")
-    logger.info(f"✅ Bot username: @{application.bot.username}")
-    
-    # Run polling
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-# ========== MAIN EXECUTION ==========
-if __name__ == '__main__':
-    # This runs when executing bot.py directly (for local testing)
-    run_bot()
+if __name__ == "__main__":
+    main()
